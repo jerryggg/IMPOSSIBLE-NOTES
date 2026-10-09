@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111827">
+<title>Notes</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e5e7eb;
+       min-height:100vh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  header{position:sticky;top:0;background:#111827;padding:16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f2937}
+  h1{margin:0;font-size:20px}
+  #status{font-size:12px;color:#34d399}
+  main{padding:16px;max-width:700px;margin:auto}
+  textarea{width:100%;min-height:120px;background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:12px;padding:12px;font-size:16px;resize:vertical}
+  button{background:#3b82f6;color:#fff;border:0;border-radius:12px;padding:12px 18px;font-size:16px;margin-top:8px}
+  .note{background:#1f2937;border-radius:12px;padding:12px;margin-top:12px;white-space:pre-wrap;word-break:break-word}
+  .note small{display:block;color:#9ca3af;margin-top:8px}
+  .note button{background:#7f1d1d;padding:6px 12px;font-size:13px;margin-top:8px}
+  #lock{position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;z-index:10}
+  #lock .icon{font-size:64px}
+  #lock p{color:#9ca3af}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="lock">
+  <div class="icon">🔒</div>
+  <h2 id="lockTitle">Checking time…</h2>
+  <p id="lockMsg">Verifying online time.</p>
+</div>
+
+<div id="app" class="hidden">
+  <header><h1>📝 Notes</h1><span id="status"></span></header>
+  <main>
+    <textarea id="input" placeholder="Write or paste a note…"></textarea>
+    <button id="save">Save note</button>
+    <div id="list"></div>
+  </main>
+</div>
+
+<script>
+// ===== SETTINGS =====
+const TIMEZONE   = "America/New_York";   // change to your timezone
+const OPEN_MIN   = 8*60 + 27;            // 8:27 AM
+const CLOSE_MIN  = 11*60 + 3;            // 11:03 AM
+const RESYNC_MS  = 5*60*1000;            // re-fetch online time every 5 min
+// ====================
+
+let baseUTC = null, basePerf = 0;   // online time anchor (device clock is never used)
+
+async function getJSON(url){
+  const c = new AbortController(); setTimeout(()=>c.abort(), 6000);
+  const r = await fetch(url,{cache:"no-store",signal:c.signal});
+  if(!r.ok) throw 0; return r.json();
+}
+const sources = [
+  async()=> (await getJSON("https://worldtimeapi.org/api/timezone/Etc/UTC")).unixtime*1000,
+  async()=> Date.parse((await getJSON("https://timeapi.io/api/time/current/zone?timeZone=UTC")).dateTime.split(".")[0]+"Z"),
+  async()=>{ // server Date header from GitHub itself
+    const r = await fetch(location.pathname+"?t="+Math.random(),{cache:"no-store"});
+    const d = r.headers.get("Date"); if(!d) throw 0; return Date.parse(d);
+  }
+];
+
+async function syncTime(){
+  for(const s of sources){
+    try{
+      const t0 = performance.now();
+      const utc = await s();
+      const t1 = performance.now();
+      if(!isNaN(utc)){ baseUTC = utc + (t1-t0)/2; basePerf = t1; return true; }
+    }catch(e){}
+  }
+  return false;
+}
+
+function nowUTC(){ return baseUTC + (performance.now()-basePerf); } // immune to device clock changes
+
+function minutesOfDay(){
+  const p = new Intl.DateTimeFormat("en-GB",{timeZone:TIMEZONE,hour:"2-digit",minute:"2-digit",hour12:false})
+            .formatToParts(new Date(nowUTC()));
+  return +p.find(x=>x.type==="hour").value % 24 * 60 + +p.find(x=>x.type==="minute").value;
+}
+
+const $ = id => document.getElementById(id);
+function setLocked(title,msg){
+  $("app").classList.add("hidden"); $("list").innerHTML=""; $("input").value="";
+  $("lock").classList.remove("hidden");
+  $("lockTitle").textContent=title; $("lockMsg").textContent=msg;
+}
+function setOpen(){
+  $("lock").classList.add("hidden"); $("app").classList.remove("hidden");
+  render();
+}
+
+function check(){
+  if(baseUTC===null){ setLocked("Locked","Can't verify online time. Connect to the internet."); return; }
+  const m = minutesOfDay();
+  if(m>=OPEN_MIN && m<CLOSE_MIN){
+    $("status").textContent = "Open until 11:03 AM";
+    if($("app").classList.contains("hidden")) setOpen();
+  } else {
+    setLocked("Locked","Opens daily 8:27 AM – 11:03 AM.");
+  }
+}
+
+// ----- notes -----
+const KEY="notes_v1";
+const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}};
+const store=n=>localStorage.setItem(KEY,JSON.stringify(n));
+function render(){
+  const list=$("list"); list.innerHTML="";
+  load().forEach((n,i)=>{
+    const d=document.createElement("div"); d.className="note";
+    d.textContent=n.text;
+    const s=document.createElement("small"); s.textContent=new Date(n.time).toLocaleString(); d.appendChild(s);
+    const b=document.createElement("button"); b.textContent="Delete";
+    b.onclick=()=>{ if(!$("app").classList.contains("hidden")){const a=load();a.splice(i,1);store(a);render();} };
+    d.appendChild(b); list.appendChild(d);
+  });
+}
+$("save").onclick=()=>{
+  if($("app").classList.contains("hidden")) return;
+  const t=$("input").value.trim(); if(!t) return;
+  const a=load(); a.unshift({text:t,time:nowUTC()}); store(a);
+  $("input").value=""; render();
+};
+
+// ----- start -----
+(async()=>{
+  await syncTime(); check();
+  setInterval(check,1000);                       // lock the moment 11:03 hits
+  setInterval(async()=>{ await syncTime(); check(); },RESYNC_MS);
+  document.addEventListener("visibilitychange",async()=>{ if(!document.hidden){ await syncTime(); check(); }});
+})();
+</script>
+</body>
+</html>
