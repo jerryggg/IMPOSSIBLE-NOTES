@@ -87,6 +87,11 @@ function minutesOfDay(){
   return +p.find(x=>x.type==="hour").value % 24 * 60 + +p.find(x=>x.type==="minute").value;
 }
 
+function isWeekday(){
+  const d = new Intl.DateTimeFormat("en-US",{timeZone:TIMEZONE,weekday:"short"}).format(new Date(nowUTC()));
+  return d!=="Sat" && d!=="Sun";
+}
+
 const $ = id => document.getElementById(id);
 function setLocked(title,msg){
   $("app").classList.add("hidden"); $("list").innerHTML=""; $("input").value="";
@@ -101,11 +106,11 @@ function setOpen(){
 function check(){
   if(baseUTC===null){ setLocked("Locked","Can't verify online time. Connect to the internet."); return; }
   const m = minutesOfDay();
-  if(m>=OPEN_MIN && m<CLOSE_MIN){
+  if(isWeekday() && m>=OPEN_MIN && m<CLOSE_MIN){
     $("status").textContent = "Open until 11:03 AM";
     if($("app").classList.contains("hidden")) setOpen();
   } else {
-    setLocked("Locked","Opens daily 8:27 AM – 11:03 AM.");
+    setLocked("Locked","Opens Monday to Friday, 8:27 AM – 11:03 AM.");
   }
 }
 
